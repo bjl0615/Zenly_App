@@ -2,25 +2,29 @@ package com.example.zenly_app
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.PersistableBundle
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import com.example.zenly_app.databinding.ActivityLoginBinding
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
+import com.kakao.sdk.auth.AuthApiClient
 import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.common.KakaoSdk
 import com.kakao.sdk.common.model.ClientError
 import com.kakao.sdk.common.model.ClientErrorCause
 import com.kakao.sdk.user.UserApiClient
 import com.kakao.sdk.user.model.User
+import com.example.zenly_app.databinding.ActivityLoginBinding
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
+    private lateinit var emailLoginResult : ActivityResultLauncher<Intent>
+    private lateinit var pendingUser : User
 
     private val callback: (OAuthToken?, Throwable?) -> Unit = { token, error ->
         if (error != null) {
@@ -34,14 +38,29 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        KakaoSdk.init(this, "a6fe16c17d01b3ed9d5ddabf6596698d")
+
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        KakaoSdk.init(this, "a6fe16c17d01b3ed9d5ddabf6596698d")
+
+        emailLoginResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if(it.resultCode == RESULT_OK) {
+                val email = it.data?.getStringExtra("email")
+
+                if(email == null) {
+                    showErrorToast()
+                    return@registerForActivityResult
+                } else {
+                    signInFirebase(pendingUser , email)
+                }
+            }
+        }
 
         binding.kakaoTalkLoginButton.setOnClickListener {
 
             if (UserApiClient.instance.isKakaoTalkLoginAvailable(this)) {
-                //카카오톡 로그인 실행
+                // 카카오톡 로그인
                 UserApiClient.instance.loginWithKakaoTalk(this) { token, error ->
 
                     if (error != null) {
@@ -60,7 +79,7 @@ class LoginActivity : AppCompatActivity() {
                     }
                 }
             } else {
-                //카카오 계정 로그인
+                // 카카오계정 로그인
                 UserApiClient.instance.loginWithKakaoAccount(this, callback = callback)
             }
         }
@@ -95,6 +114,8 @@ class LoginActivity : AppCompatActivity() {
         val kakaoEmail = user.kakaoAccount?.email.orEmpty()
 
         if (kakaoEmail.isEmpty()) {
+            pendingUser = user
+            emailLoginResult.launch(Intent(this , EmailLoginActivity::class.java))
 
             return
         }
@@ -106,34 +127,32 @@ class LoginActivity : AppCompatActivity() {
         val uId = user.id.toString()
 
         Firebase.auth.createUserWithEmailAndPassword(email, uId).addOnCompleteListener {
-            if(it.isSuccessful) {
-                // 다음과정
-            }else {
-                showErrorToast()
+            if (it.isSuccessful) {
+                updateFirebaseDatabase(user)
             }
         }.addOnFailureListener {
             // 이미 가입된 계정
-            if(it is FirebaseAuthUserCollisionException) {
-                Firebase.auth.signInWithEmailAndPassword(email , uId).addOnCompleteListener { result ->
+            if (it is FirebaseAuthUserCollisionException) {
+                Firebase.auth.signInWithEmailAndPassword(email, uId).addOnCompleteListener { result ->
                     if(result.isSuccessful) {
                         updateFirebaseDatabase(user)
-                    }else {
+                    } else {
                         showErrorToast()
                     }
-                }.addOnFailureListener {error ->
+                }.addOnFailureListener { error ->
                     error.printStackTrace()
                     showErrorToast()
                 }
-            }else {
+            } else {
                 showErrorToast()
             }
         }
     }
 
-    private fun updateFirebaseDatabase(user : User) {
+    private fun updateFirebaseDatabase(user: User) {
         val uid = Firebase.auth.currentUser?.uid.orEmpty()
 
-        val personMap = mutableMapOf<String , Any>()
+        val personMap = mutableMapOf<String, Any>()
         personMap["uid"] = uid
         personMap["name"] = user.kakaoAccount?.profile?.nickname.orEmpty()
         personMap["profilePhoto"] = user.kakaoAccount?.profile?.thumbnailImageUrl.orEmpty()
