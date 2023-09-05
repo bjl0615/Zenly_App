@@ -44,6 +44,14 @@ class LoginActivity : AppCompatActivity() {
 
         KakaoSdk.init(this, "a6fe16c17d01b3ed9d5ddabf6596698d")
 
+        if(AuthApiClient.instance.hasToken()) {
+            UserApiClient.instance.accessTokenInfo { tokenInfo, error ->  
+               if(error == null) {
+                   getKakaoAccountInfo()
+               }
+            }
+        }
+
         emailLoginResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if(it.resultCode == RESULT_OK) {
                 val email = it.data?.getStringExtra("email")
@@ -136,8 +144,6 @@ class LoginActivity : AppCompatActivity() {
                 Firebase.auth.signInWithEmailAndPassword(email, uId).addOnCompleteListener { result ->
                     if(result.isSuccessful) {
                         updateFirebaseDatabase(user)
-                    } else {
-                        showErrorToast()
                     }
                 }.addOnFailureListener { error ->
                     error.printStackTrace()
